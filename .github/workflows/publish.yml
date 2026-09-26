@@ -3,7 +3,7 @@ name: publish
 # Trusted publishing via npm OIDC (no stored token, provenance attested).
 # npmjs.com -> Add pending trusted publisher (works for a not-yet-existing
 # package; the first publish through it creates the package):
-#   Workflow: publish.yml  ·  Owner: jarvis959  ·  Repo: galvanize-dsh
+#   Workflow: publish.yml  ·  Owner: lychee888  ·  Repo: galvanize-dsh
 # NOTE: do NOT set setup-node registry-url here — it writes an empty
 # _authToken that npm rejects on the OIDC path.
 # After setup: push a `v*` tag and this workflow publishes.

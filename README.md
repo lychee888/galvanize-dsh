@@ -18,8 +18,8 @@ Works on Windows, macOS, and Linux (Node ^22.19 || >=24 — DSH's own range).
 No cloning needed; one command runs straight from GitHub:
 
 ```bash
-npx github:jarvis959/galvanize-dsh install
-# or global: npm install -g github:jarvis959/galvanize-dsh
+npx github:lychee888/galvanize-dsh install
+# or global: npm install -g github:lychee888/galvanize-dsh
 # from a clone: npm ci && node lib/cli.js install
 ```
 
@@ -27,7 +27,7 @@ npx github:jarvis959/galvanize-dsh install
 
 ```bash
 # 1. the galvanize core (same family; daemon + autostart included):
-pipx install "git+https://github.com/jarvis959/galvanize.git"
+pipx install "git+https://github.com/lychee888/galvanize.git"
 galvanize init
 
 # 2. DeepSeek Harness with its CLI on PATH:

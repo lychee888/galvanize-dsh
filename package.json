@@ -7,7 +7,7 @@
   "author": "Jarvis Lai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jarvis959/galvanize-dsh.git"
+    "url": "git+https://github.com/lychee888/galvanize-dsh.git"
   },
   "keywords": [
     "dsh-plugin",
