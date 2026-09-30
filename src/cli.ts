@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 
 import { fetchVersion, galvanizeHome, handshake, heartbeatPath, readServeInfo, surfacesPath, versionOk } from './core-client.js'
 import { PLUGIN_VERSION, readHeartbeat } from './heartbeat.js'
+import { persistWakeProfile, removeManagedWakeProfile, validateProfileName } from './profile-config.js'
 
 const ROW_ID = 'galvanize/tools'
 const PKG = 'galvanize-dsh'
@@ -368,6 +369,16 @@ async function cmdInstall(profile: string, dsh: DshBin | null, pkgSpec: string):
     }
   }
 
+  // Persist the same selection used by the probe into both runtime profiles.
+  try {
+    for (const p of new Set([profile, cfgWakeProfile()])) {
+      persistWakeProfile(join(dshHome(), 'profiles', p), cfgWakeProfile())
+    }
+  } catch (error) {
+    console.error(`Could not save wake profile: ${error}`)
+    return 1
+  }
+
   // Surface registry (exactly-one-surface rule): even before first boot,
   // record that DSH should get the plugin, not the MCP tools.
   try {
@@ -443,6 +454,7 @@ async function cmdUninstall(profile: string, dsh: DshBin | null): Promise<number
       const r = runDsh(dsh, ['plugin', '--profile', p, 'remove', PKG], 300_000)
       console.log(r.out.slice(-600))
       if (r.code !== 0) code = r.code
+      else removeManagedWakeProfile(join(dshHome(), 'profiles', p))
     }
   } else {
     console.error('dsh CLI not found — remove manually: `dsh plugin --profile ' + profile + ' remove ' + PKG + '`')
@@ -511,6 +523,13 @@ async function main(): Promise<number> {
   const profile = profileIdx >= 0 ? (argv[profileIdx + 1] ?? 'web') : 'web'
   const wakeIdx = argv.indexOf('--wake-profile')
   if (wakeIdx >= 0 && argv[wakeIdx + 1]) WAKE_PROFILE = argv[wakeIdx + 1]
+  try {
+    validateProfileName(profile)
+    validateProfileName(cfgWakeProfile())
+  } catch (error) {
+    console.error(String(error))
+    return 2
+  }
   const srcIdx = argv.indexOf('--source')
   const pkgSpec = srcIdx >= 0 && argv[srcIdx + 1] ? argv[srcIdx + 1] : resolvePkgSpec()
   let dsh = findDsh()
@@ -530,7 +549,7 @@ Usage:
   galvanize-dsh install   [--profile <p>] [--wake-profile <wp>] [--source <spec>]  mount the bundle into a DSH profile (default: web), bootstrap the wake profile (default: headless), boot-probe, then verify
                           --source: npm name | path | tarball (default: this checkout when run from one, else the npm name)
   galvanize-dsh verify    [--profile <p>]                        LOADED check: patch row ∧ fresh heartbeat ∧ /version handshake
-  galvanize-dsh uninstall [--profile <p>]                        remove the bundle + surface registry entry
+  galvanize-dsh uninstall [--profile <p>] [--wake-profile <wp>]  remove the bundle + surface registry entry
 
 The verify step is not a formality: DSH loads a broken plugin as a silent
 PENDING fiber. Only these three green checks mean the trigger_* tools exist.`)

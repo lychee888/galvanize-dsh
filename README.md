@@ -49,6 +49,10 @@ LOADED: all three checks green.
 `galvanize-dsh verify` re-runs those checks any time;
 `galvanize-dsh uninstall` reverses everything.
 
+Use `--wake-profile <name>` to choose a profile other than `headless`. The installer saves that choice into each installed profile's `cordis.patch.yml`, preserving existing settings, so later `trigger_add` calls use the same profile that the install probe verified. Uninstall removes overrides created by the installer and preserves user-authored rows.
+
+Use the same `--profile` and `--wake-profile` options when uninstalling a custom installation.
+
 ## First trigger
 
 ```bash
@@ -92,12 +96,14 @@ event ── galvanize core ── wake ──▶ dsh --profile headless "<your 
 
 ## Development
 
+For `kind=webhook` with a DSH or shell wake, `trigger_add` requires `relay_url` and accepts `relay_token` (the worker's `RELAY_TOKEN`). Deploy the galvanize relay with a separate `INGEST_TOKEN` and have senders use `Authorization: Bearer <INGEST_TOKEN>` at the returned `/ingest/<name>` URL. A missing relay returns an error before a trigger is created. See the [core's relay setup](https://github.com/lychee888/galvanize#relay-webhooks).
+
 ```bash
 npm ci && npm run build && npx vitest run && npx publint
 ```
 
 `src/index.ts` (tools) · `src/core-client.ts` (serve client) ·
-`src/cli.ts` (installer / verify / uninstall) · `test/` (18 tests against a
+`src/cli.ts` (installer / verify / uninstall) · `test/` (tests against a
 stub core — no DSH needed). CI runs the matrix on Windows, Linux, and macOS.
 
 ## License
