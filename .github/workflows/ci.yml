@@ -15,11 +15,25 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/checkout@v4
+        with:
+          repository: lychee888/galvanize
+          ref: 89cf5bbe9c1d010d3e3db66e58ab09752e95bab0
+          path: .test-core
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e .test-core
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: npm run typecheck
       - run: npx vitest run
+        env:
+          GALVANIZE_CORE_SOURCE: ${{ github.workspace }}/.test-core
       - run: npx publint

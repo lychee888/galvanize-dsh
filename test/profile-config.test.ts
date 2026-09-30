@@ -46,3 +46,8 @@ it('rejects profile names that can escape a profile directory', () => {
   }
   expect(() => validateProfileName('my-wake_2')).not.toThrow()
 })
+
+it('persists distinct target identity alongside the shared wake profile', () => {
+  persistWakeProfile(dir, 'custom-wake', 'web')
+  expect(parse(readFileSync(join(dir, 'cordis.patch.yml'), 'utf8'))[0].config).toEqual({ wakeProfile: 'custom-wake', profileIdentity: 'web' })
+})

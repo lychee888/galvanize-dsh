@@ -14,12 +14,13 @@
 import { spawnSync } from 'node:child_process'
 import { cpSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { sep as SEP, dirname, join, relative } from 'node:path'
+import { sep as SEP, delimiter, dirname, join, relative } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
-import { fetchVersion, galvanizeHome, handshake, heartbeatPath, readServeInfo, surfacesPath, versionOk } from './core-client.js'
+import { callOp, fetchVersion, galvanizeHome, handshake, readServeInfo, surfacesPath, versionOk } from './core-client.js'
 import { PLUGIN_VERSION, readHeartbeat } from './heartbeat.js'
+import { probeProfile } from './probe.js'
 import { persistWakeProfile, removeManagedWakeProfile, validateProfileName } from './profile-config.js'
 
 const ROW_ID = 'galvanize/tools'
@@ -121,6 +122,14 @@ interface DshBin {
 function findDsh(): DshBin | null {
   const envBin = (process.env['DSH_BIN'] ?? '').trim()
   if (envBin && existsSync(envBin)) return { cmd: process.execPath, args: [envBin], note: `$DSH_BIN=${envBin}` }
+  // Resolve npm's Windows shim to Node directly so stopping a probe stops
+  // the real process even when it fails before writing a heartbeat.
+  if (process.platform === 'win32') {
+    for (const dir of (process.env.PATH || '').split(delimiter)) {
+      const bin = join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+      if (existsSync(bin)) return { cmd: process.execPath, args: [bin], note: `npm entry: ${bin}` }
+    }
+  }
   const probe = spawnSync('dsh', ['--version'], { shell: process.platform === 'win32', timeout: 15_000, encoding: 'utf8' })
   if (probe.status === 0) return { cmd: 'dsh', args: [], note: 'dsh on PATH', shell: process.platform === 'win32' }
   // npx cache fallback (how DSH is often launched: npx @deepseek-ai/dsh) —
@@ -195,26 +204,26 @@ function checkPatchRow(dsh: DshBin | null, profile: string): Check {
   }
 }
 
-function checkHeartbeat(): Check {
-  const beat = readHeartbeat()
+function checkHeartbeat(profile: string): Check {
+  const beat = readHeartbeat(profile)
   if (!beat) {
     return {
-      name: 'plugin heartbeat (~/.galvanize/dsh-heartbeat.json)',
+      name: `live plugin heartbeat (profile ${profile})`,
       ok: false,
       detail:
-        'no fresh heartbeat — the plugin fiber is not ACTIVE. Boot DSH with the profile (`dsh --profile <p>` or a one-shot) and re-run verify; a PENDING fiber never writes this file.',
+        'no healthy live session proof for this profile and plugin version — start the profile and re-run verify, or reinstall to write its profile identity.',
     }
   }
   const ageS = Math.round((Date.now() - beat.ts) / 1000)
   return {
-    name: 'plugin heartbeat (~/.galvanize/dsh-heartbeat.json)',
+    name: `live plugin heartbeat (profile ${profile})`,
     ok: true,
     detail: `plugin ${beat.plugin_version}, core_api_ok=${beat.core_api_ok}, ${ageS}s ago (pid ${beat.pid})`,
   }
 }
 
 async function cmdVerify(profile: string, dsh: DshBin | null): Promise<number> {
-  const checks = [await checkHandshake(), checkPatchRow(dsh, profile), checkHeartbeat()]
+  const checks = [await checkHandshake(), checkPatchRow(dsh, profile), checkHeartbeat(profile)]
   console.log(`galvanize-dsh v${PLUGIN_VERSION} — verify (profile: ${profile})`)
   for (const c of checks) console.log(`  ${c.ok ? '✔' : '✘'} ${c.name}\n      ${c.detail}`)
   const ok = checks.every((c) => c.ok)
@@ -372,7 +381,7 @@ async function cmdInstall(profile: string, dsh: DshBin | null, pkgSpec: string):
   // Persist the same selection used by the probe into both runtime profiles.
   try {
     for (const p of new Set([profile, cfgWakeProfile()])) {
-      persistWakeProfile(join(dshHome(), 'profiles', p), cfgWakeProfile())
+      persistWakeProfile(join(dshHome(), 'profiles', p), cfgWakeProfile(), p)
     }
   } catch (error) {
     console.error(`Could not save wake profile: ${error}`)
@@ -394,56 +403,21 @@ async function cmdInstall(profile: string, dsh: DshBin | null, pkgSpec: string):
     /* doctor still detects the row */
   }
 
-  console.log('\nInstalled. Running a headless boot probe to prove the plugin loads…')
-  const probe = await bootProbe(dsh, cfgWakeProfile())
-  if (!probe.ok) {
-    // The probe is the profile-specific proof; verify alone can be made
-    // green by a heartbeat from an unrelated DSH session (~/.galvanize is
-    // shared). Never exit 0 on a failed probe.
-    console.error(`✖ probe failed: ${probe.detail}`)
+  const shared = await callOp('configure_dsh_profile', { wake_profile: cfgWakeProfile() })
+  if (!shared.ok) {
+    console.error(`Could not configure the core's DSH profile: ${shared.error}. Update galvanize core first.`)
     return 1
   }
-  console.log(`  ✔ ${probe.detail}`)
-  return cmdVerify(profile, dsh)
-}
-
-/**
- * Boot-probe: remove any stale heartbeat, run one trivial headless task in
- * the wake profile (apply() → ACTIVE → heartbeat write), wait for the file.
- * This makes `install` self-proving instead of trusting a manual boot.
- */
-async function bootProbe(
-  dsh: DshBin,
-  wakeProfile: string,
-): Promise<{ ok: boolean; detail: string }> {
-  try {
-    const { rmSync } = await import('node:fs')
-    rmSync(heartbeatPath(), { force: true })
-  } catch {
-    /* stale file removal is best-effort; freshness is ts-gated anyway */
+  const checks: Check[] = [await checkHandshake(), checkPatchRow(dsh, profile)]
+  for (const p of new Set([profile, cfgWakeProfile()])) {
+    console.log(`Probing profile ${p} while its process is alive…`)
+    const proof = await probeProfile(dsh, p, 30_000, p === cfgWakeProfile())
+    checks.push({ name: `live plugin proof (${p})`, ...proof })
   }
-  const since = Date.now() - 2_000
-  const boot = runDsh(dsh, ['--profile', wakeProfile, 'Reply with exactly: GALVANIZE_PROBE'], 300_000)
-  // The heartbeat is the proof; the boot's exit code only explains a miss.
-  // (An unconfigured LLM provider fails the *task* after fibers activate —
-  // the plugin still proved itself.)
-  const deadline = Date.now() + 20_000
-  while (Date.now() < deadline) {
-    const beat = readHeartbeat(120_000)
-    // Require THIS plugin version's heartbeat: a previously-booted DSH
-    // session refreshing the file every 30s must not count as proof.
-    if (beat && beat.ts >= since && beat.plugin_version === PLUGIN_VERSION) {
-      return { ok: true, detail: `heartbeat fresh (plugin ${beat.plugin_version}, core_api_ok=${beat.core_api_ok})` }
-    }
-    await new Promise((r) => setTimeout(r, 1_000))
-  }
-  return {
-    ok: false,
-    detail:
-      boot.code !== 0
-        ? `headless boot failed (exit ${boot.code}) and no heartbeat appeared: ${boot.out.slice(-300)}`
-        : 'headless boot succeeded but no heartbeat appeared — the plugin fiber may be PENDING (check the patch row) or the boot skipped plugin load.',
-  }
+  for (const check of checks) console.log(`  ${check.ok ? '✔' : '✘'} ${check.name}: ${check.detail}`)
+  const ok = checks.every(check => check.ok)
+  console.log(ok ? 'LOADED: all profile probes passed while alive; probe processes stopped.' : 'NOT LOADED: fix the failed checks.')
+  return ok ? 0 : 1
 }
 
 async function cmdUninstall(profile: string, dsh: DshBin | null): Promise<number> {

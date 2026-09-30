@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { apply, buildTools } from '../src/index.js'
 import { _resetHandshakeCache, callOp, handshake, SUPPORTED_API_VERSIONS } from '../src/core-client.js'
-import { PLUGIN_VERSION } from '../src/heartbeat.js'
+import { PLUGIN_VERSION, readHeartbeat } from '../src/heartbeat.js'
 import { fakeCtx, startStubCore, type StubCore } from './helpers.js'
 
 let core: StubCore
@@ -30,6 +30,13 @@ afterEach(async () => {
 const CFG = { wakeProfile: 'headless', heartbeatMs: 5_000 }
 
 describe('apply / registration', () => {
+  it('removes session proof when the plugin unloads in a still-live host', async () => {
+    apply(fake.ctx as never, { ...CFG, profileIdentity: 'web' })
+    await fake.settle()
+    expect(readHeartbeat('web')).not.toBeNull()
+    fake.disposeAll()
+    expect(readHeartbeat('web')).toBeNull()
+  })
   it('registers exactly the five trigger tools', () => {
     apply(fake.ctx as never, CFG)
     const names = fake.registered.map((t) => t.name).sort()

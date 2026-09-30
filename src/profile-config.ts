@@ -12,8 +12,10 @@ export function validateProfileName(name: string): void {
 }
 
 /** Write the runtime override after bundle installation, preserving other YAML. */
-export function persistWakeProfile(profileDir: string, wakeProfile: string): void {
+export function persistWakeProfile(profileDir: string, wakeProfile: string, profileIdentity?: string): void {
   validateProfileName(wakeProfile)
+  if (profileIdentity) validateProfileName(profileIdentity)
+  const settings = { wakeProfile, ...(profileIdentity ? { profileIdentity } : {}) }
   const path = join(profileDir, 'cordis.patch.yml')
   const doc: Document = parseDocument(existsSync(path) ? readFileSync(path, 'utf8') : '[]\n')
   if (doc.errors.length) throw new Error(`Cannot edit ${path}: ${doc.errors[0].message}`)
@@ -21,14 +23,14 @@ export function persistWakeProfile(profileDir: string, wakeProfile: string): voi
   if (!isSeq(doc.contents)) throw new Error(`${path} must contain a YAML sequence`)
   const row = doc.contents.items.find((item) => isMap(item) && item.get('id') === ROW_ID)
   if (!row) {
-    const newRow = doc.createNode({ id: ROW_ID, config: { wakeProfile } })
+    const newRow = doc.createNode({ id: ROW_ID, config: settings })
     newRow.commentBefore = MARKER
     doc.contents.items.push(newRow)
   } else if (isMap(row)) {
     const config = row.get('config', true)
     if (config && !isMap(config)) throw new Error(`${ROW_ID} config must be a YAML mapping`)
-    if (!config) row.set('config', doc.createNode({ wakeProfile }))
-    else config.set('wakeProfile', wakeProfile)
+    if (!config) row.set('config', doc.createNode(settings))
+    else for (const [key, value] of Object.entries(settings)) config.set(key, value)
   }
   const temporary = `${path}.${process.pid}.tmp`
   writeFileSync(temporary, String(doc), 'utf8')
