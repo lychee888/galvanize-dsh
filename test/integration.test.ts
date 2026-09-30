@@ -1,6 +1,6 @@
 /** Real Python core + official DSH CLI, with isolated homes and no model calls. */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -103,5 +103,30 @@ it.each([
   expect(result.status, result.stdout + result.stderr).toBe(1)
   expect(result.stdout).toContain('row present, package resolvable')
   expect(result.stdout).toContain('NOT LOADED')
-  expect(result.stdout).not.toContain('LOADED: all three checks green')
+  expect(result.stdout).not.toContain('LOADED: all four checks green')
+})
+
+it.each(['missing', 'wrong'])('actual verify rejects a %s token even with a fresh healthy heartbeat', kind => {
+  const tokenPath = join(process.env.GALVANIZE_HOME!, 'serve.token')
+  const token = readFileSync(tokenPath, 'utf8')
+  const dir = heartbeatDirectory('integration')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'healthy.json'), JSON.stringify({
+    profile: 'integration', plugin_version: PLUGIN_VERSION, pid: process.pid,
+    core_api_ok: true, ts: Date.now(), session_token: 'previously-healthy',
+  }))
+  try {
+    if (kind === 'missing') rmSync(tokenPath)
+    else writeFileSync(tokenPath, 'invalid-token')
+    const result = spawnSync(process.execPath, [resolve('lib/cli.js'), 'verify', '--profile', 'integration'], {
+      env: { ...process.env, DSH_BIN: resolve('node_modules/@deepseek-ai/dsh/lib/bin.js') },
+      windowsHide: true, encoding: 'utf8', timeout: 15_000,
+    })
+    expect(result.status, result.stdout + result.stderr).toBe(1)
+    expect(result.stdout).toContain('authenticated core access')
+    expect(result.stdout).toContain('NOT LOADED')
+  } finally {
+    writeFileSync(tokenPath, token)
+    rmSync(join(dir, 'healthy.json'))
+  }
 })

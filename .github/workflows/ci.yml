@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: lychee888/galvanize
-          ref: 89cf5bbe9c1d010d3e3db66e58ab09752e95bab0
+          ref: 23b73025d35b4a945a2fc26f7ec6d6250bdb9075
           path: .test-core
       - uses: actions/setup-python@v5
         with:

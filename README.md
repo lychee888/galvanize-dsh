@@ -8,7 +8,7 @@ with your prompt and the event's data — so "wake me when a resume shows up
 in my downloads" is a real push trigger, not a poll job. The plugin itself is
 a thin, verified client: five `trigger_*` tools in the agent schema, every
 answer proxied from the core's local API. Installation ends by *proving the
-plugin loaded* — a headless boot-probe plus three green checks — because a
+plugin loaded* — live profile probes and authenticated core access — because a
 broken DSH plugin fails as a silent no-op, and "should be fine" is the one
 answer this installer refuses to give.
 
@@ -36,14 +36,15 @@ npm install -g @deepseek-ai/dsh
 
 Then that one `npx github:…` command mounts the bundle into your DSH `web`
 profile (`--profile <p>` to change), bootstraps the headless wake profile,
-boots DSH once as a probe, and prints three green checks only if the plugin
-is verifiably running:
+probes both profiles, and reports success only with live plugin proof and
+usable core access. Verification of a running profile prints four checks:
 
 ```
-  ✔ core /version handshake        core 0.1.2, api 1
+  ✔ core /version handshake        core 0.2.0, api 1
+  ✔ authenticated core access      read-only trigger list succeeded
   ✔ patch row 'galvanize/tools'    row present, package resolvable
-  ✔ plugin heartbeat               plugin 0.1.2, core_api_ok=true, 3s ago
-LOADED: all three checks green.
+  ✔ plugin heartbeat               plugin 0.1.6, core_api_ok=true, 3s ago
+LOADED: all four checks green.
 ```
 
 `galvanize-dsh verify --profile <name>` re-runs those checks while that profile is running;
@@ -55,7 +56,9 @@ Use the same `--profile` and `--wake-profile` options when uninstalling a custom
 
 Installation probes both the target and wake profiles with separate random
 session tokens. Proof must come from that exact profile and token, the installed
-plugin version, a live PID, and a successful compatible core handshake. Running
+plugin version, a live PID, a compatible core handshake, and authenticated
+read-only core access. Missing or invalid credentials fail verification even
+when a recent heartbeat looked healthy. Running
 another profile cannot make a failed probe pass. Session records live under
 `~/.galvanize/dsh-heartbeats/<profile>/`; the legacy `dsh-heartbeat.json` is only
 a diagnostic and is never accepted by verification. Stopped, stale, unhealthy,

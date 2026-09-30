@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url'
 import { callOp, fetchVersion, galvanizeHome, handshake, readServeInfo, surfacesPath, versionOk } from './core-client.js'
 import { PLUGIN_VERSION, readHeartbeat } from './heartbeat.js'
 import { probeProfile } from './probe.js'
+import { resolveNpmDshEntry } from './dsh-bin.js'
 import { persistWakeProfile, removeManagedWakeProfile, validateProfileName } from './profile-config.js'
 
 const ROW_ID = 'galvanize/tools'
@@ -125,10 +126,8 @@ function findDsh(): DshBin | null {
   // Resolve npm's Windows shim to Node directly so stopping a probe stops
   // the real process even when it fails before writing a heartbeat.
   if (process.platform === 'win32') {
-    for (const dir of (process.env.PATH || '').split(delimiter)) {
-      const bin = join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
-      if (existsSync(bin)) return { cmd: process.execPath, args: [bin], note: `npm entry: ${bin}` }
-    }
+    const bin = resolveNpmDshEntry((process.env.PATH || '').split(delimiter))
+    if (bin) return { cmd: process.execPath, args: [bin], note: `npm entry: ${bin}` }
   }
   const probe = spawnSync('dsh', ['--version'], { shell: process.platform === 'win32', timeout: 15_000, encoding: 'utf8' })
   if (probe.status === 0) return { cmd: 'dsh', args: [], note: 'dsh on PATH', shell: process.platform === 'win32' }
@@ -191,6 +190,12 @@ async function checkHandshake(): Promise<Check> {
   return { name: 'core /version handshake', ok: true, detail: `core ${v.core_version}, api ${v.api_version}` }
 }
 
+async function checkCoreAccess(): Promise<Check> {
+  const result = await callOp('list', {}, 2000)
+  return { name: 'authenticated core access', ok: result.ok === true,
+    detail: result.ok === true ? 'read-only trigger list succeeded' : result.error || 'core access failed' }
+}
+
 function checkPatchRow(dsh: DshBin | null, profile: string): Check {
   if (!dsh) return { name: `patch row '${ROW_ID}' in profile ${profile}`, ok: false, detail: 'dsh CLI not found (set DSH_BIN or install @deepseek-ai/dsh)' }
   const { code, out } = runDsh(dsh, ['--profile', profile, '--dump-config'], 60_000)
@@ -223,11 +228,11 @@ function checkHeartbeat(profile: string): Check {
 }
 
 async function cmdVerify(profile: string, dsh: DshBin | null): Promise<number> {
-  const checks = [await checkHandshake(), checkPatchRow(dsh, profile), checkHeartbeat(profile)]
+  const checks = [await checkHandshake(), await checkCoreAccess(), checkPatchRow(dsh, profile), checkHeartbeat(profile)]
   console.log(`galvanize-dsh v${PLUGIN_VERSION} — verify (profile: ${profile})`)
   for (const c of checks) console.log(`  ${c.ok ? '✔' : '✘'} ${c.name}\n      ${c.detail}`)
   const ok = checks.every((c) => c.ok)
-  console.log(ok ? '\nLOADED: all three checks green.' : '\nNOT LOADED: fix the ✘ items above — do not trust the tools until this passes.')
+  console.log(ok ? '\nLOADED: all four checks green.' : '\nNOT LOADED: fix the ✘ items above — do not trust the tools until this passes.')
   return ok ? 0 : 1
 }
 
@@ -408,7 +413,7 @@ async function cmdInstall(profile: string, dsh: DshBin | null, pkgSpec: string):
     console.error(`Could not configure the core's DSH profile: ${shared.error}. Update galvanize core first.`)
     return 1
   }
-  const checks: Check[] = [await checkHandshake(), checkPatchRow(dsh, profile)]
+  const checks: Check[] = [await checkHandshake(), await checkCoreAccess(), checkPatchRow(dsh, profile)]
   for (const p of new Set([profile, cfgWakeProfile()])) {
     console.log(`Probing profile ${p} while its process is alive…`)
     const proof = await probeProfile(dsh, p, 30_000, p === cfgWakeProfile())

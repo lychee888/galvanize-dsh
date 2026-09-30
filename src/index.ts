@@ -24,7 +24,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
 
-import { callOp, handshake, surfacesPath } from './core-client.js'
+import { callOp, handshake, probeCoreHealth, surfacesPath } from './core-client.js'
 import { PLUGIN_VERSION, writeHeartbeat, removeHeartbeat } from './heartbeat.js'
 
 export const name = 'galvanize-tools'
@@ -237,13 +237,13 @@ export function apply(ctx: Context, config: Config = {}) {
   // LOADED proof: writes only when ACTIVE (a PENDING fiber never reaches
   // here, which is exactly what `galvanize-dsh verify` tests for).
   ctx.effect(async () => {
-    const hs = await handshake()
-    writeHeartbeat(!!hs.info, hs.info?.core_version, profile, sessionToken)
+    const hs = await probeCoreHealth()
+    writeHeartbeat(hs.ok, hs.core_version, profile, sessionToken)
     let disposed = false
     const timer = setInterval(() => {
       void (async () => {
-        const beat = await handshake()
-        if (!disposed) writeHeartbeat(!!beat.info, beat.info?.core_version, profile, sessionToken)
+        const beat = await probeCoreHealth()
+        if (!disposed) writeHeartbeat(beat.ok, beat.core_version, profile, sessionToken)
       })()
     }, Math.max(5_000, cfg.heartbeatMs))
     return () => { disposed = true; clearInterval(timer); removeHeartbeat(profile, sessionToken) }
