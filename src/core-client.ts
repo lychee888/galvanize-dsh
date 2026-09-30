@@ -159,6 +159,19 @@ export async function handshake(): Promise<{ info: VersionInfo; incompatible?: u
   return { info: null, incompatible: incompatMessage(value) }
 }
 
+/** Read-only health proof; always check current credentials, never cache auth. */
+export async function probeCoreHealth(): Promise<{ ok: boolean; core_version?: string; error?: string }> {
+  const discovery = readServeInfo()
+  const info = discovery ? await fetchVersion(discovery.port) : null
+  if (!versionOk(info)) return { ok: false, error: incompatMessage(info) }
+  const access = await callOp('list', {}, 2000)
+  return {
+    ok: access.ok === true,
+    core_version: info!.core_version,
+    ...(access.ok === true ? {} : { error: access.error || 'Authenticated core access failed' }),
+  }
+}
+
 function incompatMessage(value: VersionInfo | null): string {
   if (!value) return 'galvanize core not reachable — start it (`galvanize run`) or install it (`uvx galvanize init`).'
   return `galvanize core api_version ${value.api_version} (core ${value.core_version}) is outside this plugin's compat range [${SUPPORTED_API_VERSIONS.join(', ')}]. Upgrade either side: pip install -U galvanize | npm install -U galvanize-dsh`

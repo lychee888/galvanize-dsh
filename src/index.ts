@@ -22,9 +22,10 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
+import { randomUUID } from 'node:crypto'
 
-import { callOp, handshake, surfacesPath } from './core-client.js'
-import { PLUGIN_VERSION, writeHeartbeat } from './heartbeat.js'
+import { callOp, handshake, probeCoreHealth, surfacesPath } from './core-client.js'
+import { PLUGIN_VERSION, writeHeartbeat, removeHeartbeat } from './heartbeat.js'
 
 export const name = 'galvanize-tools'
 
@@ -33,6 +34,8 @@ export const inject = ['tools']
 
 /** Optional bundle config (row `config:` block in cordis.patch.yml). */
 export interface Config {
+  /** Installed profile identity; distinct from the profile used for future wakes. */
+  profileIdentity?: string
   /** Headless DSH profile the core's shell-wake spawns per event. */
   wakeProfile?: string
   /** Explicit wake command template; overrides the wakeProfile preset. */
@@ -224,6 +227,8 @@ export function buildTools(cfg: { wakeProfile: string; wakeCommand?: string }) {
 
 export function apply(ctx: Context, config: Config = {}) {
   const cfg = { ...DEFAULTS, ...config }
+  const profile = cfg.profileIdentity ?? 'unknown'
+  const sessionToken = process.env.GALVANIZE_PROBE_TOKEN || randomUUID()
 
   for (const tool of buildTools(cfg)) {
     ;(ctx as any).tools.register(tool)
@@ -232,15 +237,16 @@ export function apply(ctx: Context, config: Config = {}) {
   // LOADED proof: writes only when ACTIVE (a PENDING fiber never reaches
   // here, which is exactly what `galvanize-dsh verify` tests for).
   ctx.effect(async () => {
-    const hs = await handshake()
-    writeHeartbeat(!!hs.info, hs.info?.core_version)
+    const hs = await probeCoreHealth()
+    writeHeartbeat(hs.ok, hs.core_version, profile, sessionToken)
+    let disposed = false
     const timer = setInterval(() => {
       void (async () => {
-        const beat = await handshake()
-        writeHeartbeat(!!beat.info, beat.info?.core_version)
+        const beat = await probeCoreHealth()
+        if (!disposed) writeHeartbeat(beat.ok, beat.core_version, profile, sessionToken)
       })()
     }, Math.max(5_000, cfg.heartbeatMs))
-    return () => clearInterval(timer)
+    return () => { disposed = true; clearInterval(timer); removeHeartbeat(profile, sessionToken) }
   }, 'galvanize heartbeat')
 
   // Surface registry for the exactly-one-surface rule (PLAN §4): the core's
