@@ -79,6 +79,24 @@ describe('apply / registration', () => {
 })
 
 describe('trigger_add wake translation', () => {
+  it('refuses a DSH webhook without a relay before contacting the core', async () => {
+    const add = buildTools({ wakeProfile: 'custom-wake' }).find(t => t.name === 'trigger_add')!
+    const result = await add.execute({ kind: 'webhook', name: 'github' }, {})
+    expect(result.ok).toBe(false)
+    expect(String(result.error)).toContain('relay_url')
+    expect(core.calls.filter(c => c.op === 'add')).toHaveLength(0)
+  })
+
+  it('passes relay configuration and the selected profile into webhook creation', async () => {
+    const add = buildTools({ wakeProfile: 'custom-wake' }).find(t => t.name === 'trigger_add')!
+    const result = await add.execute({ kind: 'webhook', name: 'github', relay_url: 'https://relay.example', relay_token: 'read-secret' }, {})
+    expect(result.ok).toBe(true)
+    expect(core.calls.find(c => c.op === 'add')!.body).toMatchObject({
+      relay_url: 'https://relay.example', relay_token: 'read-secret',
+      command: 'dsh --profile custom-wake "{prompt}"', wake: 'shell',
+    })
+  })
+
   it("wake defaults to the dsh preset: wake=shell + command 'dsh --profile headless \"{prompt}\"'", async () => {
     apply(fake.ctx as never, CFG)
     await fake.settle()

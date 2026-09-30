@@ -116,6 +116,8 @@ export function buildTools(cfg: { wakeProfile: string; wakeCommand?: string }) {
       },
       patterns: { type: 'array', items: { type: 'string' }, description: "Filename globs, e.g. ['*.step']." },
       events: { type: 'array', items: { type: 'string' }, description: 'kind=webhook: event types to accept.' },
+      relay_url: { type: 'string', description: 'kind=webhook with a DSH/shell wake: required Cloudflare relay URL.' },
+      relay_token: { type: 'string', description: 'Bearer token for reading the relay queue (RELAY_TOKEN).' },
       wake: {
         type: 'string',
         description: "Wake target: 'dsh' (default: headless one-shot via the configured preset) or 'shell' (explicit command template with {prompt}/{payload}).",
@@ -159,6 +161,11 @@ export function buildTools(cfg: { wakeProfile: string; wakeCommand?: string }) {
       if (args.cooldown_s !== undefined) body.cooldown_s = args.cooldown_s
       if (args.deliver) body.deliver = args.deliver
       if (args.password) body.password = args.password
+      if (args.kind === 'webhook' && body.wake !== 'hermes' && !args.relay_url) {
+        return { ok: false, error: 'DSH/shell webhooks require relay_url; configure the relay and its ingestion token first.' }
+      }
+      if (args.relay_url) body.relay_url = args.relay_url
+      if (args.relay_token) body.relay_token = args.relay_token
       return guard(body, (b) => callOp('add', b))
     },
   })
