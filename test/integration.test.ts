@@ -25,17 +25,22 @@ beforeAll(async () => {
   process.env.HERMES_HOME = join(home, 'hermes')
   process.env.DSH_HOME = join(home, 'dsh')
   process.env.PYTHONPATH = coreSource
-  core = spawn(python, ['-m', 'galvanize.cli', 'serve', '--foreground'], { env: process.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
-  core.stdout?.on('data', () => {})
+  core = spawn(python, ['-u', '-m', 'galvanize.cli', 'serve', '--foreground'], { env: process.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+  core.stdout?.on('data', c => { errors += c })
   core.stderr?.on('data', c => { errors += c })
   core.on('error', e => { errors += e.message })
-  for (let i = 0; i < 100; i++) {
+  // Allow slow runner startup, checking actual API readiness throughout.
+  const deadline = Date.now() + 45_000
+  let lastError = ''
+  while (Date.now() < deadline && core.exitCode === null) {
     _resetHandshakeCache()
-    if ((await handshake()).info) return
+    const result = await handshake()
+    if (result.info) return
+    lastError = result.incompatible
     await new Promise(r => setTimeout(r, 100))
   }
-  throw new Error(`Real core failed to start: ${errors}`)
-}, 20_000)
+  throw new Error(`Real core failed to start (exit ${core.exitCode}): ${lastError}\n${errors}`)
+}, 60_000)
 
 afterAll(async () => {
   if (core && core.exitCode === null) {
